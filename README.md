@@ -1,5 +1,7 @@
 # Implementing a Logical Type System in the Villain Compiler Framework
 
+Author: William Chung
+
 This repository contains the source code to three extensions to Villain that make it closer to Typed Racket. The paper attached to this repository explains the details of these incremental extensions.
 
 
