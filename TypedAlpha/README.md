@@ -1,4 +1,4 @@
-# Typed Bumble
+# Typed Alpha
 
 This repository contains the source code for Typed Alpha, in the villain folder.
 
