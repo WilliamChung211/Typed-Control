@@ -1,4 +1,4 @@
-# Typed Bumble
+# Typed Control
 
 This repository contains the source code for Typed Control, in the villain folder.
 
