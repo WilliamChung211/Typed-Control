@@ -1,0 +1,3 @@
+#lang typed/racket
+
+(begin (define (f (x : Number)) : Any (if (zero? x) 0  (add1 (add1 (f (sub1 x))))) )(f))

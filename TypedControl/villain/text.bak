@@ -1,0 +1,4 @@
+#lang typed/racket 
+
+(begin (define (f (x : (U Number True Char))) : Number (if (number? x)  (add1 x) (char->integer x))) (f 2))
+

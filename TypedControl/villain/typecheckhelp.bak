@@ -1,0 +1,203 @@
+#lang racket
+(provide (all-defined-out))
+
+
+; HELPER FUNCTIONS TO HELP CHECK SUBSUMPTION RULES
+
+;; returns true if ty2 is a subtype of ty1
+(define (is-subtype? ty1 ty2)
+  (match ty1
+
+    ;; A type of every type is a subtype of every type
+    [(Explosion) #t]
+    [_ 
+
+     
+  (match ty2
+    ;; A type of every type is a subtype of every type
+    [(Explosion) #t]
+
+    ;; S-UNIONSUB
+    [(Union ts2) (is-subtype-union2? ty1 ts2)]
+
+    [(Integer) (match ty1
+               ;; S-UNIONSUPER
+               [(Union ts1) (is-subtype-union1? ts1 ty2)]
+                 ;; S-REFL
+               [(Integer) true]
+               [_ false])]
+    [(True) (match ty1
+              ;; S-UNIONSUPER
+                [(Union ts1) (is-subtype-union1? ts1 ty2)]
+              ;; S-REFL
+               [(True) true]
+               [_ false])]
+    [(False) (match ty1
+               ;; S-UNIONSUPER
+               [(Union ts1) (is-subtype-union1? ts1 ty2)]
+               ;; S-REFL
+               [(False) true]
+               [_ false])]
+     [(Character) (match ty1
+                    ;; S-UNIONSUPER
+                    [(Union ts1) (is-subtype-union1? ts1 ty2)]
+                    ;; S-REFL
+                    [(Character) true]
+                    [_ false])]
+;    [(Fun in-ty1 out-ty1 if-prop1 else-prop1 obj1)
+ ;    (match ty2
+  ;     [(Union ts2) (is-subtype-union2? ty1 ts2)]
+   ;            [(Fun _ in-ty2 out-ty2 if-prop1 else-prop1 obj2) (and (is-subtype? in-ty2 in-ty1) (is-subtype? out-ty1 out-ty2))]
+    ;           [_ false])]
+    [_ false]
+    )]
+ 
+ )
+)
+
+
+;; returns true if ty2 is a subtype of any type in ts1
+;; S-UNIONSUPER
+(define (is-subtype-union1? ts1 ty2)
+  (
+   match ts1
+    ('() false)
+
+    ;; Returns true if there exists an type in the ts1 that ty2 is a subtype of
+    ((cons ty1 ts1) (or  (is-subtype? ty1 ty2) (is-subtype-union1? ts1 ty2)))
+     
+    )
+    
+)
+
+
+;; returns true if everything ts2 is a subtype of t1
+;; S-UNIONSUB
+(define (is-subtype-union2? ty1 ts2)
+  (
+   match ts2
+    ('() true)
+
+    ;; Returns true if all types in ts2 is a subtype of ty1
+    ((cons ty2 ts2) (and (is-subtype? ty1 ty2) (is-subtype-union2? ty1 ts2)))
+     
+    )
+    
+)
+
+;; HELPER FUNCTIONS TO GET SUPERTYPES AND SUPER OBJECTS FOR T-IF
+
+;; gets the supertype of the two types which is either a direct supertype, or the union of each other
+(define (get-supertype ty1 ty2)
+ (if (is-subtype? ty1 ty2)
+     ty1
+     (if (is-subtype? ty2 ty1)
+         ty2
+         (simp-union (Union (list ty1 ty2)))
+         )
+     )
+)
+
+;; gets the subtype of the two types which would have to be the direct subtype of the two
+;; If there is no subtype of the two, it returns false
+(define (get-subtype ty1 ty2)
+ (if (is-subtype? ty1 ty2)
+     ty2
+     (if (is-subtype? ty2 ty1)
+         ty1
+         #f
+         )
+     
+     )
+)
+;; Gets the subtype of the two objects which follow SO-TOP and SO-REFL
+;; If there is no common subtype, it returns false
+(define (get-superobj obj1 obj2)
+  (match* (obj1 obj2)
+  [( (Empty) (Empty)) (Empty)]
+  [(_ _) (if (eqv? obj1 obj2) obj1 #f)]
+  [(_ _) (Empty)]
+  
+    )
+  )
+
+;; HELPER FUNCTIONS OF SUBSITUTING for T-APP
+
+;; subsitute each instance of x with obj in the type
+(define (subs-type ty obj x)
+  (match ty
+    [(Explosion) ty]
+    [(Integer) ty]
+    [(True)    ty]
+    [(False)   ty]
+    [(Character) ty]
+    [(Union ts) (Union (subs-types ts obj x))]
+    [(Fun in_var in-ty out-ty if-prop else-prop obj1) (Fun (if (eqv? in_var x) obj in_var)in-ty out-ty (subs-prop if-prop obj x) (subs-prop else-prop x) (subs-obj obj1 obj x))]
+   )
+ )
+
+;; subsitute each instance of x with obj in the list of types
+(define (subs-types ts obj x)
+  (match ts
+    ['() '()]
+    [(cons ty ts) (cons (subs-type ty obj x) (subs-types ts obj x))]
+  )
+)
+
+
+;; subsitute each instance of x with obj in the proposition
+(define (subs-prop prop obj x)
+  (match prop
+    [(Tt) prop]
+    [(Ff) prop]
+    [(HasType x0 ty) (if (eqv? x0 x) (HasType obj ty) prop)]
+    [(NotType x0 ty) (if (eqv? x0 x) (NotType obj ty) prop)]
+    [(OrProp p1 p2) (OrProp (subs-prop p1 obj x) (subs-prop p2 obj x))]
+ 
+   )
+)
+
+
+;; obj1 replaces x in obj0
+(define (subs-obj obj0 obj1 x)
+  (match obj0
+    [(Empty) (Empty)]
+    [_ (if eq? obj0 obj1)
+              obj1
+              obj0
+              ]
+  )
+)
+
+
+;; FUNCTIONS FOR LOOKING UP VARIABLES IN THE ENVIRONMENT in T-VAR and T-ABS
+
+;; gets variable's type from the environment
+(define (lookup-type x env)
+
+  (match env
+    ['() (error "Lookup error")]
+    [(TypeEnv #f typeBs) (get-type x typeBs)]
+    [_ (Explosion)]
+   )
+  
+)
+
+;; extracts the type from the binding
+(define (get-type x bs)
+  
+  (match bs
+    ['() (error "Lookup Error")]
+    [(cons (TypeB v ty) bs) (if (eqv? v x)  ty (get-type x bs))]
+    )
+  )
+
+;; gets the function's type from the function environment
+(define (lookup-fun f f-env)
+
+  (match f-env
+    ['() (error "Lookup error")]
+    [(cons (TypeB v ty) bs) (if (eqv? v f) ty (lookup-fun f bs))]
+    )
+  
+)

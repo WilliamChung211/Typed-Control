@@ -1,0 +1,611 @@
+#lang racket
+(provide get-judge)
+(require "ast.rkt")
+
+
+;; HELPER FUNCTIONS TO HELP CHECK SUBSUMPTION RULES
+
+;; returns true if ty2 is a subtype of ty1
+(define (is-subtype? ty1 ty2)
+  (match ty1
+
+    ;; A type of every type is a subtype of every type
+    [(Explosion) #t]
+    [_ 
+
+     
+  (match ty2
+    ;; A type of every type is a subtype of every type
+    [(Explosion) #t]
+
+    ;; S-UNIONSUB
+    [(Union ts2) (is-subtype-union2? ty1 ts2)]
+
+    [(Integer) (match ty1
+               ;; S-UNIONSUPER
+               [(Union ts1) (is-subtype-union1? ts1 ty2)]
+                 ;; S-REFL
+               [(Integer) true]
+               [_ false])]
+    [(True) (match ty1
+              ;; S-UNIONSUPER
+                [(Union ts1) (is-subtype-union1? ts1 ty2)]
+              ;; S-REFL
+               [(True) true]
+               [_ false])]
+    [(False) (match ty1
+               ;; S-UNIONSUPER
+               [(Union ts1) (is-subtype-union1? ts1 ty2)]
+               ;; S-REFL
+               [(False) true]
+               [_ false])]
+     [(Character) (match ty1
+                    ;; S-UNIONSUPER
+                    [(Union ts1) (is-subtype-union1? ts1 ty2)]
+                    ;; S-REFL
+                    [(Character) true]
+                    [_ false])]
+;    [(Fun in-ty1 out-ty1 if-prop1 else-prop1 obj1)
+ ;    (match ty2
+  ;     [(Union ts2) (is-subtype-union2? ty1 ts2)]
+   ;            [(Fun _ in-ty2 out-ty2 if-prop1 else-prop1 obj2) (and (is-subtype? in-ty2 in-ty1) (is-subtype? out-ty1 out-ty2))]
+    ;           [_ false])]
+    [_ false]
+    )]
+ 
+ )
+)
+
+
+;; returns true if ty2 is a subtype of any type in ts1
+;; S-UNIONSUPER
+(define (is-subtype-union1? ts1 ty2)
+  (
+   match ts1
+    ('() false)
+
+    ;; Returns true if there exists an type in the ts1 that ty2 is a subtype of
+    ((cons ty1 ts1) (or  (is-subtype? ty1 ty2) (is-subtype-union1? ts1 ty2)))
+     
+    )
+    
+)
+
+
+;; returns true if everything ts2 is a subtype of t1
+;; S-UNIONSUB
+(define (is-subtype-union2? ty1 ts2)
+  (
+   match ts2
+    ('() true)
+
+    ;; Returns true if all types in ts2 is a subtype of ty1
+    ((cons ty2 ts2) (and (is-subtype? ty1 ty2) (is-subtype-union2? ty1 ts2)))
+     
+    )
+    
+)
+
+;; HELPER FUNCTIONS TO GET SUPERTYPES AND SUPER OBJECTS FOR T-IF
+
+;; gets the supertype of the two types which is either a direct supertype, or the union of each other
+(define (get-supertype ty1 ty2)
+ (if (is-subtype? ty1 ty2)
+     ty1
+     (if (is-subtype? ty2 ty1)
+         ty2
+         (simp-union (Union (list ty1 ty2)))
+         )
+     )
+)
+
+;; gets the subtype of the two types which would have to be the direct subtype of the two
+;; If there is no subtype of the two, it returns false
+(define (get-subtype ty1 ty2)
+ (if (is-subtype? ty1 ty2)
+     ty2
+     (if (is-subtype? ty2 ty1)
+         ty1
+         #f
+         )
+     
+     )
+)
+;; Gets the subtype of the two objects which follow SO-TOP and SO-REFL
+;; If there is no common subtype, it returns false
+(define (get-superobj obj1 obj2)
+  (match* (obj1 obj2)
+  [( (Empty) (Empty)) (Empty)]
+  [(_ _) (if (eqv? obj1 obj2) obj1 #f)]
+  [(_ _) (Empty)]
+  
+    )
+  )
+
+;; HELPER FUNCTIONS OF SUBSITUTING for T-APP
+
+;; subsitute each instance of x with obj in the type
+(define (subs-type ty obj x)
+  (match ty
+    [(Explosion) ty]
+    [(Integer) ty]
+    [(True)    ty]
+    [(False)   ty]
+    [(Character) ty]
+    [(Union ts) (Union (subs-types ts obj x))]
+    [(Fun in_var in-ty out-ty if-prop else-prop obj1) (Fun (if (eqv? in_var x) obj in_var)in-ty out-ty (subs-prop if-prop obj x) (subs-prop else-prop x) (subs-obj obj1 obj x))]
+   )
+ )
+
+;; subsitute each instance of x with obj in the list of types
+(define (subs-types ts obj x)
+  (match ts
+    ['() '()]
+    [(cons ty ts) (cons (subs-type ty obj x) (subs-types ts obj x))]
+  )
+)
+
+
+;; subsitute each instance of x with obj in the proposition
+(define (subs-prop prop obj x)
+  (match prop
+    [(Tt) prop]
+    [(Ff) prop]
+    [(HasType x0 ty) (if (eqv? x0 x) (HasType obj ty) prop)]
+    [(NotType x0 ty) (if (eqv? x0 x) (NotType obj ty) prop)]
+    [(OrProp p1 p2) (OrProp (subs-prop p1 obj x) (subs-prop p2 obj x))]
+ 
+   )
+)
+
+
+;; obj1 replaces x in obj0
+(define (subs-obj obj0 obj1 x)
+  (match obj0
+    [(Empty) (Empty)]
+    [_ (if eq? obj0 obj1)
+              obj1
+              obj0
+              ]
+  )
+)
+
+
+;; FUNCTIONS FOR LOOKING UP VARIABLES IN THE ENVIRONMENT in T-VAR and T-ABS
+
+;; gets variable's type from the environment
+(define (lookup-type x env)
+
+  (match env
+    ['() (error "Lookup error")]
+    [(TypeEnv #f typeBs) (get-type x typeBs)]
+    [_ (Explosion)]
+   )
+  
+)
+
+;; extracts the type from the binding
+(define (get-type x bs)
+  
+  (match bs
+    ['() (error "Lookup Error")]
+    [(cons (TypeB v ty) bs) (if (eqv? v x)  ty (get-type x bs))]
+    )
+  )
+
+;; gets the function's type from the function environment
+(define (lookup-fun f f-env)
+
+  (match f-env
+    ['() (error "Lookup error")]
+    [(cons (TypeB v ty) bs) (if (eqv? v f) ty (lookup-fun f bs))]
+    )
+  
+)
+
+;; TYPING RULES
+
+;; T-CONST but without the need for the other stuff in the judgement
+(define (get-type-op1 p)
+ (match p
+   ['add1 (Fun 'x (Integer) (Integer) (Tt) (Ff) (Empty)) ]
+   ['sub1 (Fun 'x (Integer) (Integer)  (Tt) (Ff) (Empty))]
+   ['zero? (Fun 'x (Integer) (boolean) (Tt) (Ff) (Empty))]
+   ['number? (Fun 'x (any) (boolean) (HasType 'x (Integer)) (NotType 'x (Integer)) (Empty))]
+   ['boolean? (Fun 'x (any) (boolean) (HasType 'x (boolean)) (NotType 'x (boolean)) (Empty)) ]
+   ['char? (Fun 'x (any) (Character) (HasType 'x (Character)) (NotType 'x (Character)) (Empty)) ]
+   ['char->integer (Fun 'x (Character) (Integer) (Tt) (Ff) (Empty)) ]
+   ['integer->char (Fun 'x (Integer) (Character) (Tt) (Ff) (Empty)) ]
+  )
+)
+
+
+
+;; T-APP but we know it is a constant function
+;; calls the const function to get type, prop is tt | ff, object is empty
+(define (get-judge-prim1 f e env f-env)
+  ( match (get-type-op1 f)
+     ;; gets the type of the primitive
+     [ (Fun in-var in-ty out-ty thenProp1 elseProp1 obj1)
+       (match (get-judge-e e env f-env)
+                         [ (Judge e-ty thenProp2 elseProp2 obj2)
+
+                           
+                           (match env
+
+                             ;; if the environment is explosion, it automatically passes he type checker
+                             [(TypeEnv expl _)
+                              ;; otherwise, whatever operative has to be a sub-type of the the input type of the primitive
+                           (if (or expl (is-subtype? in-ty e-ty))
+
+                               ;; does T-APP where it subsitutes the object in for every instance of the constant's parameter i the types, propositions, and object
+                               (Judge (subs-type out-ty obj2 in-var ) (subs-prop thenProp1 obj2 in-var) (subs-prop elseProp1 obj2 in-var) (subs-obj obj1 obj2 in-var))
+
+                               ;; throws an error if it failed the type checking
+                               (error (string-append "Type Checker: type mismatch\nexpected: " (print-type in-ty) "\ngiven: " (print-type e-ty))))])
+                             ]
+         )
+       ]
+     )
+  )
+
+
+;; T-IF
+;; Gets judgement information of this if expression
+(define (get-judge-if e1 e2 e3 env f-env)
+  (match (get-judge-e e1 env f-env)
+
+    ;; Given judgement info of e1
+    [(Judge ty1 thenProp1 elseProp1 obj1)
+
+     ;; And judgement info of e2 given the environment has added thenProp1
+     ;; And judgement info of e3 given the environementn has added elseProp1
+     (match* ((get-judge-e e2 (add-prop thenProp1 env) f-env) (get-judge-e e3 (add-prop elseProp1 env) f-env))
+       [((Judge ty2 thenProp2 elseProp2 obj2)(Judge ty3 thenProp3 elseProp3 obj3))
+        (let ((ty (get-supertype ty2 ty3)) (obj (get-superobj obj2 obj3)))
+
+          ;; ty2 and ty3 must have the same supertype and obj2 and obj3 must have the same superobj
+          ;; follows the rule of T-IF
+          (Judge ty (OrProp thenProp2 thenProp3) (OrProp elseProp2 elseProp3) obj)
+          
+          )]
+                    )
+                
+              ]
+             )
+)
+
+
+;; T-APP but it must call a function from the function environment
+;; gets the type from the function environemt, prop is tt | ff, object is empty
+(define (get-judge-app f es env f-env)
+
+  ;; gets the function type from the function environment
+  ( match (lookup-fun f f-env)
+     [ (Fun in-var in-ty out-ty thenProp1 elseProp1 obj1)
+
+       ;; gets the judgemnt information for the argument
+       (match (get-judge-e (car es) env f-env)
+         [ (Judge e-ty thenProp2 elseProp2 obj2)
+           (match env
+
+             ;; if the environment is explosion, it automatically passes he type checker            
+             [(TypeEnv expl _)
+
+              ;; otherwise, the argument has to be a sub-type of the the input type of the primitive
+              (if (or expl (is-subtype? in-ty e-ty))
+
+                  ;; does T-APP where it subsitutes the object in for every instance of the constant's parameter i the types, propositions, and object
+                  (Judge (subs-type out-ty obj2 in-var ) (subs-prop thenProp1 obj2 in-var) (subs-prop elseProp1 obj2 in-var) (subs-obj obj1 obj2 in-var))
+
+                  ;; throws an type checker error if the argument fails the type check
+                  (error (string-append "Type Checker: type mismatch\nexpected: " (print-type in-ty) "\ngiven: " (print-type e-ty))))]) ]
+     )
+       ]
+  )
+ )
+
+
+;; Getting the judgement for an expression using the typing rules
+(define (get-judge-e e env f-env)
+ (match e
+
+   ;; T-NUM
+   [(Int i)       (Judge (Integer) (Tt) (Ff) (Empty))]
+   ;; T-TRUE
+   [(Bool #t)     (Judge (True) (Tt) (Ff) (Empty))]
+   ;; T-FALSE
+   [(Bool #f)     (Judge (False) (Ff) (Tt) (Empty))]
+   ;; T-CHAR
+   [(Char c) (Judge (Character) (Tt) (Ff) (Empty))]
+   ;; T-VAR
+   [(Var v)        (Judge (lookup-type v env) (NotType v (False)) (HasType v (False)) v)]
+   ;; T-APP with only constant primitives
+   [(Prim1 p e)   (get-judge-prim1 p e env f-env)]
+   ;; T-IF
+   [(If e1 e2 e3) (get-judge-if e1 e2 e3 env f-env)]
+   ;; T-APP with only functions defined
+   [(App f es) (get-judge-app f es env f-env)]
+   [_ (error e)]))
+
+;; gets the judgement for a program
+(define (get-judge p)
+
+  (match p
+    [(Prog ds e)  (get-judge-help ds e (TypeEnv #f '()) '())]
+   )
+)
+
+;; T-DEFINES
+(define (get-judge-help ds e env f-env)
+  (match ds
+    ['() (get-judge-e e env f-env)]
+    [(cons d ds)
+     (match d
+       [(Defn f bs out_ty exp) (match (get-judge-body bs exp env f-env)
+                               [(Judge t0 tprop_0 eprop_0 obj_0)
+                                (match t0
+                                [(Fun _ _ e-ty _ _ _)
+                                 (match env
+                             [(TypeEnv expl _)
+                           (if (or expl (is-subtype? out_ty e-ty))
+                         
+                                    (match (get-judge-help ds e env (cons  (TypeB f t0) f-env))
+                                      [(Judge t1 tprop_1 eprop_1 obj_1)
+                                       (Judge (subs-type t1 obj_0 f) (subs-prop tprop_1 obj_0 f) (subs-prop eprop_1 obj_0 f) (subs-obj obj_1 obj_0 f))]
+                                      )
+                                    (error (string-append "Type Checker: type mismatch\nexpected: " (print-type out_ty) "\ngiven: " (print-type e-ty)))
+                                    )])]
+                                  )
+                                ]
+                               )]
+    
+   )]
+ )
+  )
+
+
+
+
+;; T-ABS
+(define (get-judge-body bs e env f-env)
+  
+  
+       (match bs
+         [(list (Binding x ty))
+          (match (get-judge-e e (add-prop (HasType x ty) env) f-env)
+            [(Judge e-ty thenProp elseProp Obj)
+            
+             (Judge (Fun x ty e-ty thenProp elseProp Obj) (Tt) (Ff) (Empty))
+                                                                     
+             ]
+            )]
+         )
+
+       
+  )
+
+         
+
+(define (find-contra env)
+  (match env
+    ['()  #f]
+    [(cons (TypeB x (Explosion)) ps) (begin (print "EXPLOSION") #t)]
+    [(cons p ps) (find-contra ps)]
+   )
+ )
+
+
+(define (add-prop prop env)
+  (match env
+    [(TypeEnv expl typeBs)  (if expl env
+  (match prop
+    [(HasType x ty) (let ((binds (add-prop-has typeBs x ty)))
+                                                          (if (find-contra binds)
+                                                               (TypeEnv #t binds)
+                                                               (TypeEnv #f binds)))]
+    [(NotType x ty) (let ((binds (add-prop-not typeBs x ty)))
+                                                           (if (find-contra binds)
+                                                               (TypeEnv #t binds)
+                                                               (TypeEnv #f binds)))]
+    [(OrProp p1 p2)
+     (match (simplify-prop prop)
+     [(Tt) env]
+     [(Ff) (TypeEnv #t typeBs)]
+     [simp-prop 
+     (let ((simp (simplify-or simp-prop))) (match simp 
+                                                      [(Explosion) (TypeEnv #t typeBs)]
+                                                      [_ (let ((binds (get-or simp typeBs)))
+                                                           (if (find-contra binds)
+                                                               (TypeEnv #t binds)
+                                                               (TypeEnv #f binds)))])
+   )])
+     ]
+
+     [(Tt) env]
+     [(Ff) (TypeEnv #t typeBs)]
+ ))
+  
+                           ]
+    )
+)
+
+
+(define (add-prop-has env add-x ty-x)
+   (match env
+    ['() (list (TypeB add-x (add-prop-has-help ty-x (any))))]
+    [(cons (TypeB x ty) ps) (if (eqv? x add-x)
+                                               (let ((is-ty (add-prop-has-help ty-x ty)))
+                                                 
+
+
+                                                (cons (TypeB add-x  is-ty)
+
+                                                     ps
+                                               ))
+                                                (add-prop-has ps add-x ty-x)) ]
+   )
+)
+
+
+(define (add-prop-has-help to-add check-ty)
+  (if (is-subtype? check-ty to-add)
+      (begin (print to-add) to-add)
+      (begin (print check-ty)(Explosion))
+     )
+ )
+
+;(is-subtype? (Union (True)) (Union (True) (False)))
+
+
+  
+(define (add-prop-not env add-x ty-x)
+  (match env
+    ['() (list (TypeB add-x (add-prop-has-help ty-x (any))))]
+    [(cons (TypeB x ty) ps) (if (eqv? x add-x)
+                                               (let ((is-ty (add-prop-not-help ty-x ty)))
+                                                 
+
+
+                                                (cons (TypeB add-x is-ty)
+
+                                                     ps
+                                               ))
+                                                (add-prop-has ps add-x ty-x)) ]
+   )
+)
+
+(define (add-prop-not-help to-add check-ty)
+  (if (is-subtype? to-add check-ty)
+      (Explosion)
+      
+      (let ((to-ret (rem to-add check-ty)))
+        (match to-ret
+          ['()  (Explosion)]
+          [(cons x xs) (Union (cons x xs))]
+          [ty ty]
+          )
+        )
+   )
+ )
+
+(define (rem to-rem check-ty)
+  (match* (to-rem check-ty)
+    [((Union to-rems) _) (rems-x to-rems check-ty)]
+    [((Integer) (Integer)) '()]
+    [((True) (True))    '()]
+    [((False) (False))   '()]
+    [((Character) (Character)) '()]
+    [(_ (Union ts)) (rem-xs to-rem ts)]
+    [(_ _) check-ty]
+  )
+)
+
+(define (rems-x to-rems check-ty)
+  (match check-ty
+    ['() '()]
+    [_
+  (match to-rems
+    [(list x) (rem x check-ty)]
+    [(cons x xs) (rems-x xs (rem x check-ty))]
+      )]           
+   )
+)
+
+
+(define (rem-xs to-rem xs)
+  (match xs
+    ['() '()]
+    [(cons x xs) (let ((new-x (rem to-rem x))) (match new-x
+                                                 ['() (rem-xs to-rem xs)]
+                                                 [_   (cons x (rem-xs to-rem xs))]
+                                                 )
+                   )
+                 ]
+   )
+)
+;(find-contra (add-prop-not (list (TypeB 'x (Integer))) 'x (Union (list (True) (False)))))
+
+     
+    
+(define (simplify-prop prop)
+  (match prop
+    [(OrProp p1 p2)
+
+     (let ((simp1 (simplify-prop p1)) (simp2 (simplify-prop p2)))
+                                       (match simp1
+                       [(Tt) (Tt)]
+                      [(Ff) simp2]
+                      [_ (match simp2
+                         [(Tt) (Tt)]
+                         [(Ff) simp1]
+                         [(Tt) (OrProp simp1 simp2) ]
+                      )]
+                                         ))]
+    [prop prop]
+    
+   
+  )
+)
+
+(define (simplify-or prop)
+  (match prop
+    [(OrProp p1 p2)
+
+     (let ((simp1 (simplify-or p1)) (simp2 (simplify-or p2)))
+                                       (match* (simp1 simp2)
+                                         [((OrPropSimp x1 has1 not1 ) (OrPropSimp x2 has2 not2)) (OrPropSimp x1 (append has1 has2) (append not1 not2))]
+                    
+                      )
+                                         )]
+    [(HasType x ty) (OrPropSimp x (list ty) '())]
+    [(NotType x ty) (OrPropSimp x '() (list ty))]
+    )
+ )
+
+(define (get-or prop env)
+  (match prop
+    [(OrPropSimp x has not) (let ((ty (simp-union (Union (append (get-not not) has)))))
+                               (match ty
+                               [(Explosion) (Explosion)]
+                               [_ (add-prop-has env x ty)]
+                                 )
+    )
+  ]))
+
+(define (get-not not)
+  (match not
+    ['() '()]
+    [(cons t ts) (cons (add-prop-not-help t (any)))]
+    )
+  )
+  
+
+
+
+
+
+;(simp-union (Union (list (Union (list (True) (False))) (Union (list (False) (True))))))
+(define (print-type ty)
+  (match ty
+    
+    [(Integer) "Number"]
+    [(True)    "True"]
+    [(False)   "False"]
+    [(Character) "Char"]
+    [(Union (list (Integer) (True) (False) (Character))) "Any"]
+    [(Union (list (True) (False))) "Boolean"]
+    [(Union (list (False) (True))) "Boolean"]
+    [(Union ts) (string-append "(U " (print-types ts) ")")]
+    [_ ty]
+    ;; Don't need to print functions
+   )
+ )
+
+(define (print-types ts)
+  (match ts
+    [(list ty) (print-type ty)]
+    [(cons ty ts) (string-append (print-type ty) " " (print-types ts))]
+   )
+)
+

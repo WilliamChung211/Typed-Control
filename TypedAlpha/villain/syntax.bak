@@ -1,0 +1,74 @@
+#lang racket
+(provide get-type)
+(require "ast.rkt")
+
+;; type Type =
+;; | (Integer)
+;; |  (Boolean)
+;; | (Fun Type Type)
+
+(struct Integer ()          #:prefab)
+(struct Boolean ()         #:prefab)
+(struct Fun (in_type out_type) #:prefab)
+
+
+  
+(define (get-type-op1 p)
+ (match p
+   ['add1 (Fun (Integer) (Integer)) ]
+   ['sub1 (Fun (Integer) (Integer))]
+   ['zero? (Fun (Integer) (Boolean))]
+   )
+  )
+
+(define (struc-eq? ty1 ty2)
+  (
+   match* (ty1 ty2) 
+    [((Integer) (Integer)) true]
+    [((Boolean) (Boolean)) true]
+    [((Fun in-ty1 out-ty1) (Fun in-ty2 out-ty2)) (and (struc-eq? in-ty1 in-ty2) (struc-eq? out-ty1 out-ty2))]
+    [(_ _) false]
+    )
+    
+)
+(define (get-type-prim1 p e)
+ (match (get-type-op1 p)
+   [(Fun in-ty out-ty)
+    (let ((ty (get-type e)))
+     (if (struc-eq? in-ty (get-type e)) out-ty (string-append "Type Checker: type mismatch\nexpected: " (print-type in-ty) "\ngiven: " (print-type ty))))]
+  )
+ )
+
+(define (get-type-if e1 e2 e3)
+  (let ((ty (get-type e1)))
+  (match (get-type e1)
+          [(Boolean)
+           (let ((ty2 (get-type e2)) (ty3 (get-type e3)))
+             (if (struc-eq? ty2 ty3)
+                 ty2
+                 (error (string-append "Type Checker: type mismatch\nexpected: " (print-type ty2) "\ngiven: " (print-type ty3)))
+                 ))]
+          [_ (error (string-append "Type Checker: type mismatch\nexpected: Boolean\ngiven: " (print-type ty)))])
+    )
+  )
+
+(define (get-type-begin e1 e2)
+  (begin (get-type e1)
+         (get-type e2)
+   )
+  )
+(define (get-type e)
+ (match e
+    [(Int i)       (Integer)]
+    [(Bool b)      (Boolean)]
+    [(Prim1 p e)   (get-type-prim1 p e)]
+    [(If e1 e2 e3) (get-type-if e1 e2 e3)]
+    [(Begin e1 e2) (get-type-begin e1 e2)]
+     [_ (error "Type Checker Mismatch")]))
+
+(define (print-type ty)
+  (match ty
+    [(Integer) "Number"]
+    [(Boolean) "Boolean"]
+   )
+ )

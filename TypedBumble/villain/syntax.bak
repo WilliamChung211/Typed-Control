@@ -1,0 +1,170 @@
+#lang racket
+(provide get-type)
+(require "ast.rkt")
+
+
+(define (get-type-op1 p)
+ (match p
+   ['add1 (Fun (Integer) (Integer)) ]
+   ['sub1 (Fun (Integer) (Integer))]
+   ['zero? (Fun (Integer) (Boolean))]
+   ['number? (Fun (Any) (Boolean))]
+   ['boolean? (Fun (Any) (Boolean))]
+   )
+  )
+
+;; returns true if ty2 is a subtype of ty1
+(define (is-subtype? ty1 ty2)
+  (
+   match ty1
+    [(Any) true]
+    [(Union ts1) (is-subtype-union1? ts1 ty2)]
+    [(Integer) (match ty2
+               [(Union ts2) (is-subtype-union2? ty1 ts2)]
+               [(Integer) true]
+               [_ false])]
+    [(Boolean) (match ty2
+                 [(Union ts2) (is-subtype-union2? ty1 ts2)]
+               [(Boolean) true]
+               [_ false])]
+    [(Fun in-ty1 out-ty1)
+     (match ty2
+       [(Union ts2) (is-subtype-union2? ty1 ts2)]
+               [(Fun in-ty2 out-ty2) (and (is-subtype? in-ty2 in-ty1) (is-subtype? out-ty1 out-ty2))]
+               [_ false])]
+    [_ false]
+    )
+ )
+
+
+  ;; returns true if ty2 is a subtype of any type in ts1
+(define (is-subtype-union1? ts1 ty2)
+  (
+   match ts1
+    ('() false)
+    ((cons ty1 ts1) (or (is-subtype? ty1 ty2) (is-subtype-union1? ts1 ty2)))
+     
+    )
+    
+)
+
+  ;; returns true if everything ts2 is a subtype of t1
+(define (is-subtype-union2? ty1 ts2)
+  (
+   match ts2
+    ('() true)
+    ((cons ty2 ts2) (and (is-subtype? ty1 ty2) (is-subtype-union2? ty1 ts2)))
+     
+    )
+    
+)
+  
+
+(define (get-type-prim1 p e t)
+ (match (get-type-op1 p)
+   [(Fun in-ty out-ty)
+    (let ((ty (get-type-e e t)))
+     (if (is-subtype? in-ty (get-type-e e t)) out-ty (error (string-append "Type Checker: type mismatch\nexpected: " (print-type in-ty) "\ngiven: " (print-type ty)))))]
+  )
+ )
+
+(define (get-type-if e1 e2 e3 t)
+  (let ((ty (get-type-e e1 t)))
+  
+           (let ((ty2 (get-type-e e2 t)) (ty3 (get-type-e e3 t)))
+             (Union (list ty2 ty3)))
+
+    )
+  )
+
+(define (get-type-begin e1 e2 t)
+  (begin (get-type-e e1 t)
+         (get-type-e e2 t)
+   )
+  )
+(define (get-type-app f es t)
+  ( match (lookup-type f t)
+     [(Fun InTy OutTy) (let ((e-ty (get-type-e (car es) t)))
+      (if (is-subtype? InTy e-ty)
+          OutTy
+           (error (string-append "Type Checker: type mismatch\nexpected: " (print-type InTy) "\ngiven: " (print-type e-ty))))) ]
+     )
+  )
+
+  
+(define (get-type-e e t)
+ (match e
+    [(Int i)       (Integer)]
+    [(Bool b)      (Boolean)]
+   [(Var v)        (lookup-type v t)]
+    [(Prim1 p e)   (get-type-prim1 p e t)]
+    [(If e1 e2 e3) (get-type-if e1 e2 e3 t)]
+    [(Begin e1 e2) (get-type-begin e1 e2 t)]
+   [(App f es) (get-type-app f es t)]
+     [_ (error e)]))
+
+(define (get-type p)
+
+  (match p
+    [(Prog ds e)  (let ((t (get-type-funs ds))) (begin (get-type-defines ds t)(get-type-e e t)))]
+   )
+)
+
+(define (get-type-funs ds)
+    (match ds
+    ['() '()]
+    [(cons d ds)
+     (list (get-type-fun d)
+          (get-type-funs ds))]))
+  
+;; Defn -> Asm
+(define (get-type-fun d)
+  
+  (match d
+    [(Defn f bs out_ty _) (Binding f (Fun (get-type-binds bs) out_ty))
+     ]))
+(define (get-type-binds bs)
+  (match bs
+    [(list (Binding x ty)) ty]))
+
+(define (get-type-defines ds t)
+    (match ds
+    ['() '()]
+    [(cons d ds)
+     (list (get-type-define d t)
+          (get-type-defines ds t))]))
+  
+;; Defn -> Asm
+(define (get-type-define d t)
+  
+  (match d
+    [(Defn f bs out_ty e) (let((e-ty (get-type-e e (append bs t)))) (if
+                                                                     (is-subtype? out_ty e-ty)
+                                                                     e-ty
+                                                                     (error (string-append "Type Checker: type mismatch\nexpected: " (print-type out_ty) "\ngiven: " (print-type e-ty)))
+                                                                     ))]
+     ))
+
+(define (lookup-type x t)
+  (match t
+    ['() error "Syntax error"]
+    [(cons (Binding sym ty) ts) (if (equal? x sym) ty (lookup-type x ts))]
+    )
+  )
+
+(define (print-type ty)
+  (match ty
+    [(Integer) "Number"]
+    [(Boolean) "Boolean"]
+    [(Any) "Any"]
+    [(Union xs) (string-append "(U " (print-types xs) ")")]
+   )
+ )
+
+(define (print-types ts)
+  (match ts
+    [(list ty) (print-type ty)]
+    [(cons ty ts) (string-append (print-type ty) " " (print-types ts))]
+    )
+  )
+

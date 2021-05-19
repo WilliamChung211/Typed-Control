@@ -1,0 +1,37 @@
+#lang racket
+(provide (all-defined-out))
+
+;; type Prog = (Prog (Listof Defn) Expr)
+(struct Prog (ds e) #:prefab)
+
+;; type Defn = (Defn Id (Listof Id) Expr)
+(struct Defn (f bs out_t e) #:prefab)
+
+;; type Expr =
+;; | (Eof)
+;; | (Int Integer)
+;; | (Bool Boolean)
+;; | (Prim1 Op1 Expr)
+;; | (If Expr Expr Expr)
+;; | (Begin Expr Expr)
+;; type Op1 = 'add1 | 'sub1 | 'zero?
+
+
+(struct Int   (i)        #:prefab)
+(struct Bool  (b)        #:prefab)
+(struct Var   (v)        #:prefab)
+(struct Prim1 (p e)      #:prefab)
+(struct If    (e1 e2 e3) #:prefab)
+(struct Begin (e1 e2)    #:prefab)
+(struct App   (f es)       #:prefab)
+
+(struct Binding (x ty) #:prefab)
+
+;; Types
+
+
+(struct Integer ()          #:prefab)
+(struct Boolean ()         #:prefab)
+(struct Any ()         #:prefab)
+(struct Fun (in_type out_type) #:prefab)
+(struct Union (ts) #:prefab)

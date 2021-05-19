@@ -1,0 +1,76 @@
+#lang racket
+(provide get-type)
+(require "ast.rkt")
+
+
+;; TYPING RULES
+
+;; Gets the type of the expression
+(define (get-type e)
+ (match e
+    ;; T-NUM
+    [(Int i)       (Integer)]
+    ;; T-BOOL
+    [(Bool b)      (Boolean)]
+    ;; T-PRIM
+    [(Prim1 p e)   (get-type-prim1 p e)]
+   ;; T-IF
+   [(If e1 e2 e3) (get-type-if e1 e2 e3)]
+   [_ (error "Type Checker Mismatch")]))
+
+;; T-CONST
+(define (get-type-op1 p)
+ (match p
+   ['add1 (Fun (Integer) (Integer)) ]
+   ['sub1 (Fun (Integer) (Integer))]
+   ['zero? (Fun (Integer) (Boolean))]
+   )
+  )
+
+;; T-PRIM
+(define (get-type-prim1 p e)
+ (match (get-type-op1 p)
+   [(Fun in-ty out-ty)
+    (let ((ty (get-type e)))
+
+      ;; The operative has to match the constant's input type or a type error will be thrown
+     (if (type-eq? in-ty (get-type e)) out-ty (string-append "Type Checker: type mismatch\nexpected: " (print-type in-ty) "\ngiven: " (print-type ty))))]
+  )
+ )
+
+;; T-IF
+(define (get-type-if e1 e2 e3)
+  (let ((ty (get-type e1)))
+  (match (get-type e1)
+          [(Boolean)
+
+            ;; T2 and T3 have to be the same
+           (let ((ty2 (get-type e2)) (ty3 (get-type e3)))
+             (if (type-eq? ty2 ty3)
+                 ty2
+                 (error (string-append "Type Checker: type mismatch\nexpected: " (print-type ty2) "\ngiven: " (print-type ty3)))
+                 ))]
+          [_ (error (string-append "Type Checker: type mismatch\nexpected: Boolean\ngiven: " (print-type ty)))])
+    )
+  )
+
+
+;; HELPER FUNCTIONS
+
+;; Checks for type equality
+(define (type-eq? ty1 ty2)
+  (
+   match* (ty1 ty2) 
+    [((Integer) (Integer)) true]
+    [((Boolean) (Boolean)) true]
+    [(_ _) false]
+    )
+  )
+
+;; Prints the type for type check errors
+(define (print-type ty)
+  (match ty
+    [(Integer) "Number"]
+    [(Boolean) "Boolean"]
+   )
+ )

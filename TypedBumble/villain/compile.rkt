@@ -1,0 +1,190 @@
+#lang racket
+(provide (all-defined-out))
+(require "ast.rkt" "types.rkt" a86/ast "typecheck.rkt")
+
+;; Registers used
+(define rax 'rax) ; return
+(define rbx 'rbx) ; heap
+(define rdx 'rdx) ; return, 2
+(define r8  'r8)  ; scratch in +, -
+(define r9  'r9)  ; scratch in assert-type
+(define rsp 'rsp) ; stack
+(define rdi 'rdi) ; arg
+
+;; type CEnv = [Listof Variable]
+
+;; Expr -> Asm
+(define (compile p)
+  (match p
+    [(Prog ds e)
+     (begin (get-type p)
+     (prog (Global 'entry)
+           (Default 'rel)
+           (Section '.text)
+           (Extern 'str_to_symbol)
+           (Label 'entry)
+           (Mov rbx rdi) ; recv heap pointer
+           (compile-e e '(#f))
+           (Mov rdx rbx) ; return heap pointer in second return register           
+           (Ret)
+           (compile-defines ds)))]))
+
+;; [Listof Defn] -> Asm
+(define (compile-defines ds)
+  (match ds
+    ['() (seq)]
+    [(cons d ds)
+     (seq (compile-define d)
+          (compile-defines ds))]))
+  
+;; Defn -> Asm
+(define (compile-define d)
+  (match d
+    [(Defn f bs out_t e)
+     (seq (Label (symbol->label f))
+          (compile-e e (parity (cons #f (reverse (get-xs bs)))))
+          (Ret))]))
+
+(define (get-xs bs)
+  (match bs
+   ['() '()]
+   [(cons h t)
+    (match h
+      [(Binding x ty) (cons x (get-xs t))]
+      )]
+   )
+  )
+(define (parity c)
+  (if (even? (length c))
+      (append c (list #f))
+      c))
+
+;; Expr CEnv -> Asm
+(define (compile-e e c)
+ 
+       (match e
+         [(Int i)            (compile-value i)]
+         [(Bool b)           (compile-value b)]
+         [(Var x)            (compile-variable x c)]
+         [(App f es)         (compile-app f es c)]    
+         [(Prim1 p e)        (compile-prim1 p e c)]
+         [(If e1 e2 e3)      (compile-if e1 e2 e3 c)]
+
+         )
+       )
+
+
+;; Value -> Asm
+(define (compile-value v)
+  (seq (Mov rax (imm->bits v))))
+
+;; Id CEnv -> Asm
+(define (compile-variable x c)
+  (let ((i (lookup x c)))       
+    (seq (Mov rax (Offset rsp i)))))
+
+;; Id CEnv -> Integer
+(define (lookup x cenv)
+  (match cenv
+    ['() (error "undefined variable:" x)]
+    [(cons y rest)
+     (match (eq? x y)
+       [#t 0]
+       [#f (+ 8 (lookup x rest))])]))
+
+;; Op1 Expr -> Asm
+(define (compile-prim1 p e c)
+  (seq (compile-e e c)
+       (compile-op1 p)))
+
+;; Op1 -> Asm
+(define (compile-op1 p)
+  (match p
+    ['add1 (Add rax (imm->bits 1))]
+    ['sub1 (Sub rax (imm->bits 1))]
+    ['zero?
+     (let ((l1 (gensym)))
+       (seq (Cmp rax 0)
+            (Mov rax val-true)
+            (Je l1)
+            (Mov rax val-false)
+            (Label l1)))]
+     ['number?
+          (let ((l1 (gensym)))
+            (seq (And rax mask-int)
+                 (Xor rax type-int)
+                 (Cmp rax 0)
+                 (Mov rax val-true)
+                 (Je l1)
+                 (Mov rax val-false)
+                 (Label l1)))]
+    ['boolean?
+          (let ((l1 (gensym)))
+            (seq (Xor rax val-true)
+                 (Cmp rax 0)
+                 (Mov rax val-true)
+                 (Je l1)
+                 (Xor rax val-false)
+                 (Cmp rax 0)
+                 (Je l1)
+                 (Mov rax val-false)
+                 (Label l1)))]
+     
+   ))
+
+;; Expr Expr Expr -> Asm
+(define (compile-if e1 e2 e3 c)
+  (let ((l1 (gensym 'if))
+        (l2 (gensym 'if)))
+    (seq (compile-e e1 c)
+         (Cmp rax val-false)
+         (Je l1)
+         (compile-e e2 c)
+         (Jmp l2)
+         (Label l1)
+         (compile-e e3 c)
+         (Label l2))))
+
+
+;; Id [Listof Expr] CEnv -> Asm
+;; Here's why this code is so gross: you have to align the stack for the call
+;; but you have to do it *before* evaluating the arguments es, because you need
+;; es's values to be just above 'rsp when the call is made.  But if you push
+;; a frame in order to align the call, you've got to compile es in a static
+;; environment that accounts for that frame, hence:
+(define (compile-app f es c)
+  (if (even? (+ (length es) (length c))) 
+      (seq (compile-es es c)
+           (Call (symbol->label f))
+           (Add rsp (* 8 (length es))))            ; pop args
+      (seq (Sub rsp 8)                             ; adjust stack
+           (compile-es es (cons #f c))
+           (Call (symbol->label f))
+           (Add rsp (* 8 (add1 (length es)))))))   ; pop args and pad
+
+;; [Listof Expr] CEnv -> Asm
+(define (compile-es es c)
+  (match es
+    ['() '()]
+    [(cons e es)
+     (seq (compile-e e c)
+          (Push rax)
+          (compile-es es (cons #f c)))]))
+
+;; Symbol -> Label
+;; Produce a symbol that is a valid Nasm label
+(define (symbol->label s)
+  (string->symbol
+   (string-append
+    "label_"
+    (list->string
+     (map (λ (c)
+            (if (or (char<=? #\a c #\z)
+                    (char<=? #\A c #\Z)
+                    (char<=? #\0 c #\9)
+                    (memq c '(#\_ #\$ #\# #\@ #\~ #\. #\?)))
+                c
+                #\_))
+         (string->list (symbol->string s))))
+    "_"
+    (number->string (eq-hash-code s) 16))))

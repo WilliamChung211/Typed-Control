@@ -1,0 +1,73 @@
+#lang racket
+(provide interp interp-env interp-prim1)
+(require "ast.rkt"
+         "env.rkt"
+         "interp-prim.rkt" "typecheck.rkt")
+
+;; type Answer = Value | 'err
+
+;; type Value =
+;; | Integer
+;; | Boolean
+;; | Character
+
+;; type REnv = (Listof (List Id Value))
+;; type Defns = (Listof Defn)
+
+;; Prog Defns -> Answer
+(define (interp p)
+  (begin (get-judge p)
+  (match p
+    [(Prog ds e)
+     (interp-env e '() ds)]))
+  )
+
+;; Expr Env Defns -> Answer
+(define (interp-env e r ds)
+  (match e
+    [(Int i)  i]
+    [(Bool b) b]
+    [(Char c) c]
+    [(Var x)  (lookup r x)]
+    [(Prim1 p e)
+     (match (interp-env e r ds)
+       ['err 'err]
+       [v (interp-prim1 p v)])]
+    [(If p e1 e2)
+     (match (interp-env p r ds)
+       ['err 'err]
+       [v
+        (if v
+            (interp-env e1 r ds)
+            (interp-env e2 r ds))])]
+    [(App f es)
+     (match (interp-env* es r ds)
+       [(list vs ...)
+        (match (defns-lookup ds f)
+          [(Defn f bs _ e)
+           ; check arity matches
+           (if (= (length bs) (length vs))
+               (interp-env e (zip bs vs) ds)
+               'err)])]
+       [_ 'err])]))
+
+;; (Listof Expr) REnv Defns -> (Listof Value) | 'err
+(define (interp-env* es r ds)
+  (match es
+    ['() '()]
+    [(cons e es)
+     (match (interp-env e r ds)
+       ['err 'err]
+       [v (cons v (interp-env* es r ds))])]))
+
+;; Defns Symbol -> Defn
+(define (defns-lookup ds f)
+  (findf (match-lambda [(Defn g _ _ _) (eq? f g)])
+         ds))
+
+(define (zip xs ys)
+  (match* (xs ys)
+    [('() '()) '()]
+    [((cons (Binding x ty) xs) (cons y ys))
+     (cons (list x y)
+           (zip xs ys))]))
